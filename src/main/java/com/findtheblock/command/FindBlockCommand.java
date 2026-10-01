@@ -4,7 +4,7 @@ import com.findtheblock.FindTheBlockMod;
 import com.findtheblock.game.GameManager;
 import com.findtheblock.team.Team;
 import com.findtheblock.team.TeamManager;
-import com.mojang.authlib.GameProfile;
+import net.minecraft.server.players.NameAndId;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
@@ -231,7 +231,7 @@ public class FindBlockCommand {
         return 1;
     }
 
-    private static int executeTeamAdd(CommandSourceStack source, Collection<GameProfile> profiles, String teamId) {
+    private static int executeTeamAdd(CommandSourceStack source, Collection<NameAndId> profiles, String teamId) {
         GameManager gameManager = FindTheBlockMod.GAME_MANAGER;
         if (gameManager == null) {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
@@ -246,7 +246,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("Kein Spieler angegeben."));
             return 0;
         }
-        GameProfile profile = profiles.iterator().next();
+        NameAndId profile = profiles.iterator().next();
         UUID uuid = profile.id();
         if (uuid == null) {
             source.sendSystemMessage(Component.literal("Spieler hat keine UUID (Offline-Profil unvollstaendig)."));
@@ -262,7 +262,7 @@ public class FindBlockCommand {
         return 1;
     }
 
-    private static int executeTeamRemove(CommandSourceStack source, Collection<GameProfile> profiles) {
+    private static int executeTeamRemove(CommandSourceStack source, Collection<NameAndId> profiles) {
         GameManager gameManager = FindTheBlockMod.GAME_MANAGER;
         if (gameManager == null) {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
@@ -272,7 +272,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("Kein Spieler angegeben."));
             return 0;
         }
-        GameProfile profile = profiles.iterator().next();
+        NameAndId profile = profiles.iterator().next();
         UUID uuid = profile.id();
         if (uuid == null) {
             source.sendSystemMessage(Component.literal("Spieler hat keine UUID (Offline-Profil unvollstaendig)."));
