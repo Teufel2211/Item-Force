@@ -23,12 +23,14 @@ public class ConfigManager {
     private static final Path TEAMS_FILE = ROOT.resolve("teams.json");
     private static final Path PLAYERS_FILE = ROOT.resolve("players.json");
     private static final Path SCORES_FILE = ROOT.resolve("scores.json");
+    private static final Path STATE_FILE = ROOT.resolve("gamestate.json");
 
     public static FindBlockConfig CONFIG;
     public static BlockConfig BLOCKS;
     public static TeamConfig TEAMS;
     public static PlayerConfig PLAYERS;
     public static ScoreConfig SCORES;
+    public static GameStateStore GAMESTATE;
 
     public static void init() {
         try {
@@ -41,6 +43,7 @@ public class ConfigManager {
         TEAMS = loadTeams();
         PLAYERS = loadPlayers();
         SCORES = loadScores();
+        GAMESTATE = loadState();
     }
 
     public static void reload() {
@@ -69,6 +72,22 @@ public class ConfigManager {
     public static void saveTeams() { writeJson(TEAMS_FILE, TEAMS); }
     public static void savePlayers() { writeJson(PLAYERS_FILE, PLAYERS); }
     public static void saveScores() { writeJson(SCORES_FILE, SCORES); }
+
+    public static GameStateStore loadState() {
+        GameStateStore store = readJson(STATE_FILE, GameStateStore.class, GameStateStore::createDefault, true);
+        if (store == null) {
+            store = GameStateStore.createDefault();
+        }
+        GAMESTATE = store;
+        return store;
+    }
+
+    public static void saveState() {
+        if (GAMESTATE == null) {
+            GAMESTATE = GameStateStore.createDefault();
+        }
+        writeJson(STATE_FILE, GAMESTATE);
+    }
 
     private static FindBlockConfig loadConfig() {
         FindBlockConfig cfg = readJson(CONFIG_FILE, FindBlockConfig.class, FindBlockConfig::createDefault, true);
