@@ -15,6 +15,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
 
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,6 +24,8 @@ import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
 public class FindBlockCommand {
+    private static final Map<String, Long> pendingScoreReset = new HashMap<>();
+    private static final long RESET_CONFIRM_MS = 30000;
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(literal("findblock")
                 // Public read-only (M5)
@@ -29,7 +33,7 @@ public class FindBlockCommand {
                 .then(literal("score")
                         .executes(context -> executeScore(context.getSource(), null))
                         .then(argument("team", StringArgumentType.word()).executes(context -> executeScore(context.getSource(), StringArgumentType.getString(context, "team"))))
-                        .then(literal("reset").requires(FindBlockCommand::isAdmin).executes(context -> executeScoreReset(context.getSource()))))
+                        .then(literal("reset").requires(FindBlockCommand::isAdmin).executes(context -> executeScoreReset(context.getSource())).then(literal("confirm").executes(context -> executeScoreReset(context.getSource())))))
                 .then(literal("team")
                         .then(literal("list").executes(context -> executeTeamList(context.getSource())))
                         .then(literal("info").then(argument("team", StringArgumentType.word()).executes(context -> executeTeamInfo(context.getSource(), StringArgumentType.getString(context, "team")))))
@@ -191,10 +195,30 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        String key = confirmKey(source);
+        long now = System.currentTimeMillis();
+        Long asked = pendingScoreReset.get(key);
+        if (asked == null || now - asked > RESET_CONFIRM_MS) {
+            pendingScoreReset.put(key, now);
+            source.sendSystemMessage(Component.literal("Wirklich ALLE Punkte zuruecksetzen? Bestaetigen mit: /findblock score reset confirm"));
+            return 0;
+        }
+        pendingScoreReset.remove(key);
         audit(source, "score reset");
         gameManager.resetScores();
-        source.sendSystemMessage(Component.literal("Alle Punkte zuruckgesetzt."));
+        source.sendSystemMessage(Component.literal("Alle Punkte zurueckgesetzt."));
         return 1;
+    }
+
+    private static String confirmKey(CommandSourceStack source) {
+        try {
+            ServerPlayer p = source.getPlayer();
+            if (p != null) {
+                return p.getUUID().toString();
+            }
+        } catch (Exception ignored) {
+        }
+        return "console";
     }
 
     private static int executeTeamList(CommandSourceStack source) {
