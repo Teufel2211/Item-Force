@@ -8,11 +8,13 @@ import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
 
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,8 +33,8 @@ public class FindBlockCommand {
                 .then(literal("team")
                         .then(literal("list").executes(context -> executeTeamList(context.getSource())))
                         .then(literal("info").then(argument("team", StringArgumentType.word()).executes(context -> executeTeamInfo(context.getSource(), StringArgumentType.getString(context, "team")))))
-                        .then(literal("add").requires(FindBlockCommand::isAdmin).then(argument("player", StringArgumentType.word()).then(argument("team", StringArgumentType.word()).executes(context -> executeTeamAdd(context.getSource(), StringArgumentType.getString(context, "player"), StringArgumentType.getString(context, "team"))))))
-                        .then(literal("remove").requires(FindBlockCommand::isAdmin).then(argument("player", StringArgumentType.word()).executes(context -> executeTeamRemove(context.getSource(), StringArgumentType.getString(context, "player"))))))
+                        .then(literal("add").requires(FindBlockCommand::isAdmin).then(argument("player", GameProfileArgument.gameProfile()).then(argument("team", StringArgumentType.word()).executes(context -> executeTeamAdd(context.getSource(), GameProfileArgument.getGameProfiles(context, "player"), StringArgumentType.getString(context, "team"))))))
+                        .then(literal("remove").requires(FindBlockCommand::isAdmin).then(argument("player", GameProfileArgument.gameProfile()).executes(context -> executeTeamRemove(context.getSource(), GameProfileArgument.getGameProfiles(context, "player"))))))
                 // Admin write commands (M5)
                 .then(literal("start").requires(FindBlockCommand::isAdmin).executes(context -> executeStart(context.getSource())))
                 .then(literal("stop").requires(FindBlockCommand::isAdmin).executes(context -> executeStop(context.getSource())))
@@ -45,11 +47,7 @@ public class FindBlockCommand {
     }
 
     private static boolean isAdmin(CommandSourceStack source) {
-        try {
-            return source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
-        } catch (Exception e) {
-            return source.hasPermission(4);
-        }
+        return source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
     }
 
     private static int executeStart(CommandSourceStack source) {
@@ -58,6 +56,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        audit(source, "start");
         boolean ok = gameManager.startGame(getPlayerFromSource(source));
         if (!ok) {
             source.sendSystemMessage(Component.literal("Start nicht moglich (bereits aktiv oder keine Blocke). Siehe Status."));
@@ -72,6 +71,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        audit(source, "stop");
         boolean ok = gameManager.stopGame(getPlayerFromSource(source));
         if (!ok) {
             source.sendSystemMessage(Component.literal("Es lauft kein Spiel."));
@@ -87,6 +87,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        audit(source, "pause");
         boolean ok = gameManager.pauseGame(getPlayerFromSource(source));
         if (!ok) {
             source.sendSystemMessage(Component.literal("Pause nicht moglich (nur AKTIV/COUNTDOWN)."));
@@ -101,6 +102,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        audit(source, "resume");
         boolean ok = gameManager.resumeGame(getPlayerFromSource(source));
         if (!ok) {
             source.sendSystemMessage(Component.literal("Resume nicht moglich (nicht pausiert)."));
@@ -115,6 +117,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        audit(source, "restart");
         gameManager.restartGame(getPlayerFromSource(source));
         source.sendSystemMessage(Component.literal("Spiel zuruckgesetzt. Punkte bleiben (siehe /findblock score reset)."));
         return 1;
@@ -136,6 +139,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        audit(source, "next");
         boolean ok = gameManager.nextRound();
         if (!ok) {
             source.sendSystemMessage(Component.literal("Next nicht moglich (kein aktives Spiel)."));
@@ -151,6 +155,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        audit(source, "reload");
         gameManager.reloadConfigs();
         source.sendSystemMessage(Component.literal("Konfiguration neu geladen. Hinweis: blockOrder wirkt bei aktivem Spiel erst nach stop+start voll."));
         return 1;
@@ -186,6 +191,7 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
+        audit(source, "score reset");
         gameManager.resetScores();
         source.sendSystemMessage(Component.literal("Alle Punkte zuruckgesetzt."));
         return 1;
@@ -225,7 +231,7 @@ public class FindBlockCommand {
         return 1;
     }
 
-    private static int executeTeamAdd(CommandSourceStack source, String playerName, String teamId) {
+    private static int executeTeamAdd(CommandSourceStack source, Collection<GameProfile> profiles, String teamId) {
         GameManager gameManager = FindTheBlockMod.GAME_MANAGER;
         if (gameManager == null) {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
@@ -236,60 +242,64 @@ public class FindBlockCommand {
             source.sendSystemMessage(Component.literal("Team nicht gefunden: " + teamId));
             return 0;
         }
-        UUID uuid = resolvePlayerUuid(source.getServer(), playerName);
-        if (uuid == null) {
-            source.sendSystemMessage(Component.literal("Spieler nicht gefunden (auch nicht offline): " + playerName));
+        if (profiles == null || profiles.isEmpty()) {
+            source.sendSystemMessage(Component.literal("Kein Spieler angegeben."));
             return 0;
         }
+        GameProfile profile = profiles.iterator().next();
+        UUID uuid = profile.id();
+        if (uuid == null) {
+            source.sendSystemMessage(Component.literal("Spieler hat keine UUID (Offline-Profil unvollstaendig)."));
+            return 0;
+        }
+        audit(source, "team add " + profile.name() + " " + teamId);
         boolean ok = gameManager.getTeamManager().assignPlayer(uuid, teamId);
         if (!ok) {
             source.sendSystemMessage(Component.literal("Zuweisung fehlgeschlagen."));
             return 0;
         }
-        ServerPlayer online = source.getServer().getPlayerList().getPlayerByName(playerName);
-        String display = online != null ? online.getName().getString() : playerName;
-        source.sendSystemMessage(Component.literal(display + " wurde dem Team " + team.get().name + " zugewiesen."));
+        source.sendSystemMessage(Component.literal(profile.name() + " wurde dem Team " + team.get().name + " zugewiesen."));
         return 1;
     }
 
-    private static int executeTeamRemove(CommandSourceStack source, String playerName) {
+    private static int executeTeamRemove(CommandSourceStack source, Collection<GameProfile> profiles) {
         GameManager gameManager = FindTheBlockMod.GAME_MANAGER;
         if (gameManager == null) {
             source.sendSystemMessage(Component.literal("FindTheBlock ist nicht initialisiert."));
             return 0;
         }
-        UUID uuid = resolvePlayerUuid(source.getServer(), playerName);
-        if (uuid == null) {
-            source.sendSystemMessage(Component.literal("Spieler nicht gefunden (auch nicht offline): " + playerName));
+        if (profiles == null || profiles.isEmpty()) {
+            source.sendSystemMessage(Component.literal("Kein Spieler angegeben."));
             return 0;
         }
+        GameProfile profile = profiles.iterator().next();
+        UUID uuid = profile.id();
+        if (uuid == null) {
+            source.sendSystemMessage(Component.literal("Spieler hat keine UUID (Offline-Profil unvollstaendig)."));
+            return 0;
+        }
+        audit(source, "team remove " + profile.name());
         boolean removed = gameManager.getTeamManager().removePlayer(uuid);
         if (!removed) {
-            source.sendSystemMessage(Component.literal("Spieler war keinem Team zugewiesen: " + playerName));
+            source.sendSystemMessage(Component.literal("Spieler war keinem Team zugewiesen: " + profile.name()));
             return 0;
         }
-        source.sendSystemMessage(Component.literal(playerName + " wurde aus dem Team entfernt."));
+        source.sendSystemMessage(Component.literal(profile.name() + " wurde aus dem Team entfernt."));
         return 1;
     }
 
-    private static UUID resolvePlayerUuid(MinecraftServer server, String name) {
-        if (server == null || name == null) return null;
+    static void audit(CommandSourceStack source, String action) {
         try {
-            ServerPlayer online = server.getPlayerList().getPlayerByName(name);
-            if (online != null) return online.getUUID();
-        } catch (Exception ignored) {
-        }
-        try {
-            var cache = server.getProfileCache();
-            if (cache != null) {
-                Optional<GameProfile> profile = cache.get(name);
-                if (profile.isPresent() && profile.get().getId() != null) {
-                    return profile.get().getId();
-                }
+            String who;
+            try {
+                ServerPlayer p = source.getPlayer();
+                who = p != null ? p.getName().getString() : source.getDisplayName().getString();
+            } catch (Exception e) {
+                who = source.getDisplayName().getString();
             }
+            FindTheBlockMod.LOGGER.info("findblock: {} -> {}", who, action);
         } catch (Exception ignored) {
         }
-        return null;
     }
 
     private static ServerPlayer getPlayerFromSource(CommandSourceStack source) {
