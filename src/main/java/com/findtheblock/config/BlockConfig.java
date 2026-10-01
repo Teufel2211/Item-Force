@@ -18,7 +18,8 @@ public class BlockConfig {
             "minecraft:redstone_ore",
             "minecraft:lapis_ore",
             "minecraft:diamond_ore",
-            "minecraft:emerald_ore"
+            "minecraft:emerald_ore",
+            "minecraft:ancient_debris"
     );
 
     public List<String> invalidBlocks = new ArrayList<>();
