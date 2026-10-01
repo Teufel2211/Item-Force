@@ -5,9 +5,12 @@ import com.findtheblock.config.ConfigManager;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
@@ -21,6 +24,10 @@ public class BlockEventHandler {
             if (!isMode("BREAK")) return;
             if (FindTheBlockMod.GAME_MANAGER == null) return;
             try {
+                if (FindTheBlockMod.GAME_MANAGER.consumeIfPlaced(serverLevel, pos)) {
+                    serverPlayer.sendSystemMessage(Component.literal("Selbst platziert - zahlt nicht!"));
+                    return;
+                }
                 FindTheBlockMod.GAME_MANAGER.handleBlockFound(serverPlayer, serverLevel, state);
             } catch (Exception e) {
                 FindTheBlockMod.LOGGER.warn("Fehler in BREAK-Handler", e);
@@ -37,7 +44,21 @@ public class BlockEventHandler {
             if (!(hitResult instanceof BlockHitResult blockHit)) return InteractionResult.PASS;
 
             try {
+                if (isMode("BREAK") && FindTheBlockMod.GAME_MANAGER.isActiveRound()) {
+                    var stack = player.getItemInHand(hand);
+                    Block target = FindTheBlockMod.GAME_MANAGER.getCurrentTargetBlock();
+                    if (target != null && stack != null && stack.getItem() instanceof BlockItem blockItem
+                            && blockItem.getBlock() == target) {
+                        BlockPos hitPos = blockHit.getBlockPos();
+                        BlockPos placed = world.getBlockState(hitPos).isAir() ? hitPos : hitPos.relative(blockHit.getDirection());
+                        FindTheBlockMod.GAME_MANAGER.markPlaced(serverLevel, placed);
+                    }
+                }
                 if (isMode("INTERACT")) {
+                    if (FindTheBlockMod.GAME_MANAGER.consumeIfPlaced(serverLevel, blockHit.getBlockPos())) {
+                        serverPlayer.sendSystemMessage(Component.literal("Selbst platziert - zahlt nicht!"));
+                        return InteractionResult.PASS;
+                    }
                     FindTheBlockMod.GAME_MANAGER.handleBlockFound(serverPlayer, serverLevel, world.getBlockState(blockHit.getBlockPos()));
                 } else if (isMode("PLACE")) {
                     var stack = player.getItemInHand(hand);
