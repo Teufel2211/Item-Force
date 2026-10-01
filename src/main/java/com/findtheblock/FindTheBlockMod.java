@@ -9,7 +9,6 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -17,6 +16,10 @@ import org.apache.logging.log4j.Logger;
 public class FindTheBlockMod implements ModInitializer {
     public static final Logger LOGGER = LogManager.getLogger("findtheblock");
     public static GameManager GAME_MANAGER;
+
+    public static GameManager getGameManager() {
+        return GAME_MANAGER;
+    }
 
     @Override
     public void onInitialize() {
@@ -58,4 +61,3 @@ public class FindTheBlockMod implements ModInitializer {
         }
     }
 }
-
