@@ -6,7 +6,7 @@
   "description": "Multiplayer Find-the-Block minigame",
   "authors": ["FindTheBlock Team"],
   "contact": {
-    "homepage": "https://example.com"
+    "homepage": "https://github.com/Teufel2211/Item-Force"
   },
   "license": "MIT",
   "environment": "server",
