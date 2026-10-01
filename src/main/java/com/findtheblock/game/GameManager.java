@@ -1,5 +1,6 @@
 package com.findtheblock.game;
 
+import com.findtheblock.FindTheBlockMod;
 import com.findtheblock.config.ConfigManager;
 import com.findtheblock.config.FindBlockConfig;
 import com.findtheblock.hud.BossBarManager;
@@ -28,6 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class GameManager {
     private final TeamManager teamManager;
     private GameState state = GameState.WAITING;
+    private GameState stateBeforePause = null;
     private int roundNumber = 0;
     private final List<Identifier> blockOrder = new ArrayList<>();
     private int currentIndex = -1;
@@ -45,6 +47,13 @@ public class GameManager {
     }
 
     public void initialize(MinecraftServer server) {
+        // Old bossbar players cleanup (M4): avoid leaking viewers across re-init
+        if (this.bossBarManager != null) {
+            try {
+                this.bossBarManager.removeAllPlayers();
+            } catch (Exception ignored) {
+            }
+        }
         this.server = server;
         this.bossBarManager = new BossBarManager();
         this.scoreDisplay = new ScoreDisplay(server);
@@ -54,6 +63,9 @@ public class GameManager {
 
     public void tick(MinecraftServer server) {
         this.server = server;
+        if (paused) {
+            return;
+        }
 
         switch (state) {
             case WAITING:
@@ -89,8 +101,8 @@ public class GameManager {
                 broadcastMessage("Spiel startet in " + seconds + " Sekunden!");
                 bossBarManager.setTitle("Spiel startet in " + seconds);
             } else {
-                broadcastMessage("Nächste Runde in " + seconds + " ...");
-                bossBarManager.setTitle("Nächste Runde in " + seconds);
+                broadcastMessage("Nachste Runde in " + seconds + " ...");
+                bossBarManager.setTitle("Nachste Runde in " + seconds);
             }
         }
 
@@ -105,22 +117,29 @@ public class GameManager {
             return false;
         }
 
+        if (ConfigManager.CONFIG != null) {
+            ConfigManager.CONFIG.validate();
+        }
         if (blockOrder.isEmpty()) {
-            sendMessage(sender, "Keine gültigen Blöcke gefunden. Bitte blocks.json prüfen.");
+            sendMessage(sender, "Keine gultigen Blocke gefunden. Bitte blocks.json prufen.");
+            broadcastMessage("Keine gultigen Blocke gefunden. Bitte blocks.json prufen.");
             return false;
         }
 
         paused = false;
+        stateBeforePause = null;
         roundNumber = 0;
         currentIndex = 0;
         roundAlreadyWon.set(false);
         state = GameState.COUNTDOWN;
-        countdownTicks = ConfigManager.CONFIG.countdownSeconds * 20;
+        int cd = ConfigManager.CONFIG != null ? ConfigManager.CONFIG.countdownSeconds : 5;
+        if (cd < 1) cd = 5;
+        countdownTicks = cd * 20;
         betweenRoundTicks = 0;
 
         broadcastMessage("Find the Block Spiel startet!");
         bossBarManager.setColor(BossEvent.BossBarColor.RED);
-        bossBarManager.setTitle("Find the Block startet in " + ConfigManager.CONFIG.countdownSeconds);
+        bossBarManager.setTitle("Find the Block startet in " + cd);
         bossBarManager.setVisible(true);
         playGlobalSound(SoundEvents.NOTE_BLOCK_PLING);
         refreshHud();
@@ -129,50 +148,64 @@ public class GameManager {
 
     public boolean stopGame(ServerPlayer sender) {
         if (state == GameState.WAITING && !paused) {
-            sendMessage(sender, "Es läuft kein Find the Block Spiel.");
+            sendMessage(sender, "Es lauft kein Find the Block Spiel.");
             return false;
         }
 
         paused = false;
+        stateBeforePause = null;
         state = GameState.FINISHED;
         broadcastMessage("Find the Block Spiel beendet.");
         bossBarManager.setColor(BossEvent.BossBarColor.RED);
         bossBarManager.setTitle("SPIEL BEENDET");
+        // Hide after stop so HUD does not stick forever (M4)
+        bossBarManager.setVisible(false);
         refreshHud();
         return true;
     }
 
     public boolean pauseGame(ServerPlayer sender) {
-        if (state != GameState.ACTIVE) {
-            sendMessage(sender, "Das Spiel kann jetzt nicht pausiert werden.");
+        if (paused) {
+            sendMessage(sender, "Das Spiel ist bereits pausiert.");
+            return false;
+        }
+        if (state != GameState.ACTIVE && state != GameState.COUNTDOWN) {
+            sendMessage(sender, "Das Spiel kann jetzt nicht pausiert werden (nur AKTIV/COUNTDOWN).");
             return false;
         }
 
         paused = true;
+        stateBeforePause = state;
         state = GameState.WAITING;
         sendMessage(sender, "Spiel pausiert.");
+        broadcastMessage("Spiel pausiert.");
         bossBarManager.setTitle("PAUSIERT");
+        refreshHud();
         return true;
     }
 
     public boolean resumeGame(ServerPlayer sender) {
-        if (!paused || state != GameState.WAITING) {
+        if (!paused) {
             sendMessage(sender, "Das Spiel ist nicht pausiert.");
             return false;
         }
 
         paused = false;
-        state = GameState.ACTIVE;
+        state = stateBeforePause != null ? stateBeforePause : GameState.ACTIVE;
+        stateBeforePause = null;
         sendMessage(sender, "Spiel fortgesetzt.");
-        if (currentTarget != null) {
+        broadcastMessage("Spiel fortgesetzt.");
+        if (currentTarget != null && state == GameState.ACTIVE) {
             bossBarManager.setColor(BossEvent.BossBarColor.YELLOW);
             bossBarManager.setTitle("GESUCHT: " + toReadableName(currentTarget));
         }
+        refreshHud();
         return true;
     }
 
     public boolean restartGame(ServerPlayer sender) {
         paused = false;
+        stateBeforePause = null;
         state = GameState.WAITING;
         roundNumber = 0;
         currentIndex = -1;
@@ -180,10 +213,15 @@ public class GameManager {
         betweenRoundTicks = 0;
         roundAlreadyWon.set(false);
         currentTarget = null;
-        sendMessage(sender, "Spiel neu gestartet.");
+        sendMessage(sender, "Spiel neu gestartet. Punkte bleiben erhalten (siehe /findblock score reset).");
         bossBarManager.setVisible(false);
         refreshHud();
         return true;
+    }
+
+    public void resetScores() {
+        teamManager.resetScores();
+        refreshHud();
     }
 
     private void startRound() {
@@ -200,50 +238,69 @@ public class GameManager {
         broadcastMessage("Neue Runde " + roundNumber + "! Gesucht wird: " + toReadableName(currentTarget));
         bossBarManager.setColor(BossEvent.BossBarColor.YELLOW);
         bossBarManager.setTitle("GESUCHT: " + toReadableName(currentTarget));
-        bossBarManager.setVisible(true);
+        bossBarManager.setVisible(shouldShowBossBar());
         playGlobalSound(SoundEvents.NOTE_BLOCK_PLING);
         refreshHud();
     }
 
-    public void nextRound() {
-        if (state == GameState.ACTIVE || state == GameState.FOUND) {
+    public boolean nextRound() {
+        if (state == GameState.ACTIVE || state == GameState.FOUND || state == GameState.COUNTDOWN) {
             roundAlreadyWon.set(false);
             advanceToNextRound();
+            return true;
         }
+        return false;
     }
 
     private void advanceToNextRound() {
         currentIndex++;
-        if (currentIndex >= blockOrder.size()) {
-            if (ConfigManager.CONFIG.loopBlocks) {
+        int size = blockOrder.size();
+        boolean loop = ConfigManager.CONFIG != null && ConfigManager.CONFIG.loopBlocks;
+        int maxRounds = ConfigManager.CONFIG != null ? ConfigManager.CONFIG.maxRounds : 10;
+        if (maxRounds < 1) maxRounds = 10;
+
+        if (loop) {
+            // With loop: play until maxRounds reached, wrap block list (M6)
+            if (roundNumber >= maxRounds) {
+                finishGame();
+                return;
+            }
+            if (size <= 0) {
+                finishGame();
+                return;
+            }
+            if (currentIndex >= size) {
                 currentIndex = 0;
-            } else {
+            }
+        } else {
+            // Without loop: effective end = min(blocks, maxRounds) (M6)
+            int effectiveMax = Math.min(size, maxRounds);
+            if (roundNumber >= effectiveMax || currentIndex >= size) {
                 finishGame();
                 return;
             }
         }
 
-        if (roundNumber >= ConfigManager.CONFIG.maxRounds) {
-            finishGame();
-            return;
-        }
-
         state = GameState.COUNTDOWN;
-        countdownTicks = ConfigManager.CONFIG.countdownSeconds * 20;
+        int cd = ConfigManager.CONFIG != null ? ConfigManager.CONFIG.countdownSeconds : 5;
+        if (cd < 1) cd = 5;
+        countdownTicks = cd * 20;
         bossBarManager.setColor(BossEvent.BossBarColor.PURPLE);
-        bossBarManager.setTitle("Nächste Runde in " + ConfigManager.CONFIG.countdownSeconds);
+        bossBarManager.setTitle("Nachste Runde in " + cd);
         refreshHud();
     }
 
     private void finishGame() {
         state = GameState.FINISHED;
+        paused = false;
+        stateBeforePause = null;
 
         Team winner = determineWinner();
         if (winner != null) {
             broadcastMessage("SPIEL BEENDET");
-            broadcastMessage("🏆 " + winner.name + " GEWINNT!");
+            broadcastMessage(winner.name + " GEWINNT!");
             bossBarManager.setColor(BossEvent.BossBarColor.GREEN);
-            bossBarManager.setTitle("🏆 " + winner.name + " GEWINNT!");
+            bossBarManager.setTitle(winner.name + " GEWINNT!");
         } else {
             broadcastMessage("SPIEL BEENDET");
             broadcastMessage("UNENTSCHIEDEN");
@@ -251,8 +308,13 @@ public class GameManager {
             bossBarManager.setTitle("UNENTSCHIEDEN");
         }
 
+        bossBarManager.setVisible(shouldShowBossBar());
         broadcastScores();
-        playGlobalSound(BuiltInRegistries.SOUND_EVENT.wrapAsHolder(SoundEvents.PLAYER_LEVELUP));
+        try {
+            playGlobalSound(BuiltInRegistries.SOUND_EVENT.wrapAsHolder(SoundEvents.PLAYER_LEVELUP));
+        } catch (Exception e) {
+            playGlobalSound(SoundEvents.NOTE_BLOCK_BELL);
+        }
         refreshHud();
     }
 
@@ -267,7 +329,7 @@ public class GameManager {
                 bestScore = score;
                 best = team;
                 tie = false;
-            } else if (score == bestScore && score > 0) {
+            } else if (score == bestScore) {
                 tie = true;
             }
         }
@@ -279,6 +341,7 @@ public class GameManager {
     }
 
     public boolean handleBlockFound(ServerPlayer player, ServerLevel world, BlockState blockState) {
+        if (blockState == null) return false;
         return handleFound(player, world, blockState.getBlock());
     }
 
@@ -287,6 +350,7 @@ public class GameManager {
     }
 
     private boolean handleFound(ServerPlayer player, ServerLevel world, Block block) {
+        if (player == null || world == null || block == null) return false;
         if (state != GameState.ACTIVE || currentTarget == null) {
             return false;
         }
@@ -299,67 +363,105 @@ public class GameManager {
             return false;
         }
 
-        if (!roundAlreadyWon.compareAndSet(false, true)) {
+        // Team check BEFORE consuming roundAlreadyWon (C3)
+        Optional<Team> playerTeam = teamManager.getTeamForPlayer(player);
+        boolean allowUnassigned = ConfigManager.CONFIG != null && ConfigManager.CONFIG.allowUnassignedPlayers;
+        boolean allowed = allowUnassigned || playerTeam.isPresent();
+
+        if (!allowed) {
+            player.sendSystemMessage(Component.literal("Du bist keinem Team zugewiesen - Runde lauft weiter!"));
             return false;
         }
 
-        Optional<Team> playerTeam = teamManager.getTeamForPlayer(player);
-        boolean allowed = ConfigManager.CONFIG.allowUnassignedPlayers || playerTeam.isPresent();
-
-        if (!allowed) {
-            broadcastMessage(player.getName().getString() + " hat den Block gefunden, ist aber keinem Team zugewiesen!");
-            state = GameState.FOUND;
-            betweenRoundTicks = ConfigManager.CONFIG.betweenRoundSeconds * 20;
-            playGlobalSound(SoundEvents.NOTE_BLOCK_BELL);
-            return true;
+        if (!roundAlreadyWon.compareAndSet(false, true)) {
+            return false;
         }
 
         if (playerTeam.isPresent()) {
             Team team = playerTeam.get();
             teamManager.addScore(team.id, 1);
-            broadcastMessage("✓ " + toReadableName(currentTarget) + " GEFUNDEN!");
+            broadcastMessage(toReadableName(currentTarget) + " GEFUNDEN!");
             broadcastMessage(player.getName().getString() + " hat den Block gefunden.");
-            broadcastMessage("Team " + team.name + " erhält 1 Punkt!");
+            broadcastMessage("Team " + team.name + " erhalt 1 Punkt!");
         } else {
-            broadcastMessage("✓ " + toReadableName(currentTarget) + " GEFUNDEN!");
+            broadcastMessage(toReadableName(currentTarget) + " GEFUNDEN!");
             broadcastMessage(player.getName().getString() + " hat den Block gefunden. Kein Team-Punkt (Spieler ohne Team).");
         }
 
         state = GameState.FOUND;
-        betweenRoundTicks = ConfigManager.CONFIG.betweenRoundSeconds * 20;
+        int btw = ConfigManager.CONFIG != null ? ConfigManager.CONFIG.betweenRoundSeconds : 3;
+        if (btw < 0) btw = 3;
+        betweenRoundTicks = btw * 20;
         bossBarManager.setColor(BossEvent.BossBarColor.GREEN);
-        bossBarManager.setTitle("✓ " + toReadableName(currentTarget) + " GEFUNDEN!");
+        bossBarManager.setTitle(toReadableName(currentTarget) + " GEFUNDEN!");
         playGlobalSound(SoundEvents.NOTE_BLOCK_BELL);
         refreshHud();
         return true;
     }
 
     private boolean isTargetBlock(Block block) {
-        Identifier id = BuiltInRegistries.BLOCK.getKey(block);
-        if (id == null || !id.equals(currentTarget)) {
+        try {
+            Identifier id = BuiltInRegistries.BLOCK.getKey(block);
+            if (id == null || currentTarget == null || !id.equals(currentTarget)) {
+                return false;
+            }
+            return block == BuiltInRegistries.BLOCK.getValue(currentTarget);
+        } catch (Exception e) {
             return false;
         }
-        return block == BuiltInRegistries.BLOCK.getValue(currentTarget);
     }
 
     private boolean isDimensionAllowed(ServerLevel world) {
-        List<String> allowed = ConfigManager.CONFIG.allowedDimensions;
-        if (allowed == null || allowed.isEmpty()) {
+        try {
+            if (ConfigManager.CONFIG == null) return true;
+            List<String> allowed = ConfigManager.CONFIG.allowedDimensions;
+            if (allowed == null || allowed.isEmpty()) {
+                return true;
+            }
+            String dimId = dimensionId(world);
+            return allowed.contains(dimId);
+        } catch (Exception e) {
             return true;
         }
-        return allowed.contains(world.dimension().identifier().toString());
+    }
+
+    private static String dimensionId(ServerLevel level) {
+        try {
+            Object key = level.dimension();
+            if (key == null) return "";
+            // Mojmap: location(), Yarn-alt: identifier()/getValue() - via reflection for compat (M7)
+            for (String m : new String[]{"location", "identifier", "getValue"}) {
+                try {
+                    var method = key.getClass().getMethod(m);
+                    Object id = method.invoke(key);
+                    if (id != null) return String.valueOf(id);
+                } catch (NoSuchMethodException ignored) {
+                }
+            }
+            return key.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     public void onPlayerJoin(ServerPlayer player) {
-        if (bossBarManager != null && ConfigManager.CONFIG.showBossBar) {
-            bossBarManager.addPlayer(player);
+        if (player == null) return;
+        try {
+            if (bossBarManager != null && ConfigManager.CONFIG != null && ConfigManager.CONFIG.showBossBar) {
+                bossBarManager.addPlayer(player);
+            }
+        } catch (Exception ignored) {
         }
         refreshHud();
     }
 
     public void onPlayerLeave(ServerPlayer player) {
-        if (bossBarManager != null) {
-            bossBarManager.removePlayer(player);
+        if (player == null) return;
+        try {
+            if (bossBarManager != null) {
+                bossBarManager.removePlayer(player);
+            }
+        } catch (Exception ignored) {
         }
     }
 
@@ -367,10 +469,11 @@ public class GameManager {
         StringBuilder sb = new StringBuilder();
         sb.append("Find the Block\n");
         sb.append("\nStatus: ").append(stateName(state)).append("\n");
-        if (state == GameState.WAITING && paused) {
+        if (paused) {
             sb.append("PAUSIERT\n");
         }
-        sb.append("Runde: ").append(roundNumber).append("/").append(ConfigManager.CONFIG.maxRounds).append("\n");
+        int maxRounds = ConfigManager.CONFIG != null ? ConfigManager.CONFIG.maxRounds : 10;
+        sb.append("Runde: ").append(roundNumber).append("/").append(maxRounds).append("\n");
         if (currentTarget != null) {
             sb.append("Gesuchter Block: ").append(toReadableName(currentTarget)).append("\n");
         }
@@ -396,89 +499,160 @@ public class GameManager {
     }
 
     private String stateName(GameState s) {
+        if (s == null) return "UNBEKANNT";
         switch (s) {
             case WAITING: return "WARTEND";
             case COUNTDOWN: return "COUNTDOWN";
             case ACTIVE: return "AKTIV";
             case FOUND: return "GEFUNDEN";
-            case NEXT_ROUND: return "NÄCHSTE RUNDE";
+            case NEXT_ROUND: return "NAECHSTE RUNDE";
             case FINISHED: return "BEENDET";
             default: return "UNBEKANNT";
         }
     }
 
     public void reloadConfigs() {
-        blockOrder.clear();
+        boolean gameActive = (state == GameState.ACTIVE || state == GameState.COUNTDOWN || state == GameState.FOUND);
+        Identifier oldTarget = currentTarget;
+
         ConfigManager.reload();
+        if (ConfigManager.CONFIG != null) {
+            ConfigManager.CONFIG.validate();
+        }
         teamManager.reload();
 
-        if (ConfigManager.BLOCKS != null) {
+        List<Identifier> fresh = new ArrayList<>();
+        if (ConfigManager.BLOCKS != null && ConfigManager.BLOCKS.blocks != null) {
             for (String blockName : ConfigManager.BLOCKS.blocks) {
                 try {
+                    if (blockName == null) continue;
                     Identifier id = Identifier.tryParse(blockName);
                     if (id != null && BuiltInRegistries.BLOCK.containsKey(id)) {
-                        blockOrder.add(id);
+                        fresh.add(id);
+                    } else {
+                        FindTheBlockMod.LOGGER.warn("Ungultiger Block in blocks.json ubersprungen: {}", blockName);
                     }
                 } catch (Exception e) {
-                    // Skip invalid blocks
+                    FindTheBlockMod.LOGGER.warn("Ungultiger Block in blocks.json ubersprungen: {}", blockName);
                 }
+            }
+        }
+        blockOrder.clear();
+        blockOrder.addAll(fresh);
+
+        if (blockOrder.isEmpty()) {
+            FindTheBlockMod.LOGGER.warn("Keine gultigen Blocke nach Reload - Spiel kann nicht starten.");
+        }
+
+        if (gameActive) {
+            // Do not corrupt running round (M2): keep current target for this round
+            if (oldTarget != null) {
+                currentTarget = oldTarget;
+                int idx = blockOrder.indexOf(oldTarget);
+                if (idx >= 0) {
+                    currentIndex = idx;
+                }
+                FindTheBlockMod.LOGGER.warn("Reload wahrend aktivem Spiel: blockOrder aktualisiert, laufende Runde bleibt beim alten Ziel. Voll wirksam nach /findblock stop+start.");
+            } else if (currentIndex >= blockOrder.size()) {
+                currentIndex = blockOrder.isEmpty() ? -1 : 0;
+            }
+        } else {
+            currentIndex = -1;
+            if (state == GameState.WAITING || state == GameState.FINISHED) {
+                currentTarget = null;
             }
         }
         refreshHud();
     }
 
     private void refreshHud() {
-        if (scoreDisplay == null) {
-            return;
+        try {
+            if (scoreDisplay == null || ConfigManager.CONFIG == null) {
+                return;
+            }
+            if (ConfigManager.CONFIG.showScoreboard) {
+                scoreDisplay.update(teamManager.getTeams(), teamManager.getScores());
+            } else {
+                scoreDisplay.clear();
+            }
+            if (bossBarManager != null) {
+                bossBarManager.setVisible(shouldShowBossBar());
+            }
+        } catch (Exception e) {
+            FindTheBlockMod.LOGGER.warn("HUD-Refresh fehlgeschlagen", e);
         }
-        if (ConfigManager.CONFIG.showScoreboard) {
-            scoreDisplay.update(teamManager.getTeams(), teamManager.getScores());
-        } else {
-            scoreDisplay.clear();
-        }
-        if (bossBarManager != null) {
-            bossBarManager.setVisible(ConfigManager.CONFIG.showBossBar && state != GameState.WAITING && !paused);
-        }
+    }
+
+    private boolean shouldShowBossBar() {
+        if (ConfigManager.CONFIG == null || !ConfigManager.CONFIG.showBossBar) return false;
+        if (paused) return true;
+        return state != GameState.WAITING;
     }
 
     private String toReadableName(Identifier id) {
-        String path = id.getPath();
-        return path.replace("_", " ");
+        if (id == null) return "?";
+        try {
+            Block block = BuiltInRegistries.BLOCK.getValue(id);
+            if (block != null) {
+                String localized = block.getName().getString();
+                if (localized != null && !localized.isBlank()) {
+                    return localized;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return id.getPath().replace("_", " ");
     }
 
     private void broadcastMessage(String message) {
-        if (server != null) {
-            server.getPlayerList().broadcastSystemMessage(Component.literal(message), false);
+        if (server != null && message != null) {
+            try {
+                server.getPlayerList().broadcastSystemMessage(Component.literal(message), false);
+            } catch (Exception ignored) {
+            }
         }
     }
 
     private void sendMessage(ServerPlayer player, String message) {
-        if (player != null) {
-            player.sendSystemMessage(Component.literal(message));
+        if (player != null && message != null) {
+            try {
+                player.sendSystemMessage(Component.literal(message));
+            } catch (Exception ignored) {
+            }
         }
     }
 
     private void playGlobalSound(Holder<SoundEvent> sound) {
-        if (server == null) {
+        if (server == null || sound == null) {
             return;
         }
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.level().playSound(
-                    null,
-                    player.getX(),
-                    player.getY(),
-                    player.getZ(),
-                    sound,
-                    SoundSource.MASTER,
-                    1.0F,
-                    1.0F
-            );
+        try {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                try {
+                    player.level().playSound(
+                            null,
+                            player.getX(),
+                            player.getY(),
+                            player.getZ(),
+                            sound,
+                            SoundSource.MASTER,
+                            1.0F,
+                            1.0F
+                    );
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception ignored) {
         }
     }
 
     // Getters
     public GameState getState() {
         return state;
+    }
+
+    public boolean isPaused() {
+        return paused;
     }
 
     public Identifier getCurrentTarget() {
@@ -491,5 +665,9 @@ public class GameManager {
 
     public int getRoundNumber() {
         return roundNumber;
+    }
+
+    public FindBlockConfig getConfig() {
+        return ConfigManager.CONFIG;
     }
 }
