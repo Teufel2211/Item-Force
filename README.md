@@ -1,6 +1,6 @@
 # Find the Block
 
-Multiplayer **Find-the-Block** minigame for Minecraft **Java Edition 26.1.2** (Fabric).
+Multiplayer **Find-the-Block** minigame for Minecraft **Java Edition 26.2** (Fabric).
 
 Above the screen a bossbar permanently shows the block being searched. The first player who finds/breaks the target block wins exactly **1 point** for their team, then the next round starts automatically with the next block from a configured, fixed order.
 
@@ -17,9 +17,9 @@ Above the screen a bossbar permanently shows the block being searched. The first
 
 ## Fabric version
 
-- Minecraft: **26.1.2**
-- Fabric Loader: **>= 0.18.4** (tested with 0.19.x)
-- Fabric API: **>= 0.155.2+26.1.2**
+- Minecraft: **26.2**
+- Fabric Loader: **>= 0.19.5** (tested with 0.19.5)
+- Fabric API: **>= 0.161.0+26.2**
 - Java: **>= 25**
 
 The mod runs on a dedicated server. It contains **no client code**, so vanilla clients can connect.
@@ -36,7 +36,7 @@ Windows:
 gradlew.bat build
 ```
 
-Output jar: `build/libs/findtheblock-1.0.0.jar`
+Output jar: `build/libs/findtheblock-1.1.0.jar`
 
 ## Configuration
 
@@ -186,7 +186,7 @@ Ties are announced as `UNENTSCHIEDEN`.
 
 | Problem | Fix |
 |---------|-----|
-| `Mod resolution failed ... requires version 0.19.3` | Update Fabric Loader on the server to `>= 0.18.4` (ideally 0.19.x) |
+| `Mod resolution failed ... requires version 0.19.5` | Update Fabric Loader on the server to `>= 0.19.5` (ideally 0.19.5) |
 | `Keine gültigen Blöcke gefunden` | Check `blocks.json` – only registered block identifiers are accepted |
 | No bossbar / sidebar | Set `showBossBar` / `showScoreboard` to `true` and run `/findblock reload` |
 | Points lost after restart | Points are only saved when a point is awarded; scores persist in `scores.json` |
