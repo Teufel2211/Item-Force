@@ -11,6 +11,8 @@ public class FindBlockConfig {
     public boolean showBossBar = true;
     public boolean showScoreboard = true;
     public boolean allowUnassignedPlayers = false;
+    public boolean ignorePlacedDuringRound = true;
+    public boolean ignoreCreativePlayers = true;
     public boolean loopBlocks = false;
     public List<String> allowedDimensions = Arrays.asList(
             "minecraft:overworld",
