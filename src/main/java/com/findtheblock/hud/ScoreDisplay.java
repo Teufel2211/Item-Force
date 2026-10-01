@@ -22,29 +22,67 @@ public class ScoreDisplay {
     }
 
     public void update(Collection<Team> teams, Map<String, Integer> scores) {
-        clear();
+        // Reuse objective instead of clear()+recreate to avoid flicker/packet spam (M4)
+        Objective objective = scoreboard.getObjective(OBJECTIVE_NAME);
+        if (objective == null) {
+            objective = scoreboard.addObjective(
+                    OBJECTIVE_NAME,
+                    ObjectiveCriteria.DUMMY,
+                    Component.literal("Find the Block"),
+                    ObjectiveCriteria.RenderType.INTEGER,
+                    false,
+                    null
+            );
+            scoreboard.setDisplayObjective(DisplaySlot.SIDEBAR, objective);
+        }
 
-        Objective objective = scoreboard.addObjective(
-                OBJECTIVE_NAME,
-                ObjectiveCriteria.DUMMY,
-                Component.literal("Find the Block"),
-                ObjectiveCriteria.RenderType.INTEGER,
-                false,
-                null
-        );
-        scoreboard.setDisplayObjective(DisplaySlot.SIDEBAR, objective);
+        if (teams == null) return;
+        if (scores == null) scores = Map.of();
 
+        // Stable holder = team.id (no collisions, no 40-char limit issues).
+        // Sidebar therefore shows IDs (team1) - stable by design.
         for (Team team : teams) {
+            if (team == null || team.id == null) continue;
             int points = scores.getOrDefault(team.id, 0);
-            String line = (team.name == null || team.name.isBlank()) ? team.id : team.name;
-            scoreboard.getOrCreatePlayerScore(ScoreHolder.forNameOnly(line), objective).set(points);
+            try {
+                scoreboard.getOrCreatePlayerScore(ScoreHolder.forNameOnly(team.id), objective).set(points);
+            } catch (Exception ignored) {
+            }
+        }
+
+        // Remove stale entries of deleted teams
+        try {
+            for (String holder : scoreboard.getTrackedPlayers()) {
+                boolean known = false;
+                for (Team t : teams) {
+                    if (t != null && holder.equals(t.id)) {
+                        known = true;
+                        break;
+                    }
+                }
+                if (!known && holder != null && holder.startsWith("team")) {
+                    scoreboard.resetSinglePlayerScore(ScoreHolder.forNameOnly(holder), objective);
+                }
+            }
+        } catch (Exception ignored) {
+            // getTrackedPlayers may differ across mappings - stale entries are harmless
         }
     }
 
     public void clear() {
         Objective existing = scoreboard.getObjective(OBJECTIVE_NAME);
         if (existing != null) {
-            scoreboard.removeObjective(existing);
+            try {
+                scoreboard.removeObjective(existing);
+            } catch (Exception ignored) {
+            }
+        }
+        try {
+            if (scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR) != null
+                    && OBJECTIVE_NAME.equals(scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR).getName())) {
+                scoreboard.setDisplayObjective(DisplaySlot.SIDEBAR, null);
+            }
+        } catch (Exception ignored) {
         }
     }
 }
