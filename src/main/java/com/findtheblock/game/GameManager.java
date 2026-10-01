@@ -3,6 +3,7 @@ package com.findtheblock.game;
 import com.findtheblock.FindTheBlockMod;
 import com.findtheblock.config.ConfigManager;
 import com.findtheblock.config.FindBlockConfig;
+import com.findtheblock.config.GameStateStore;
 import com.findtheblock.hud.BossBarManager;
 import com.findtheblock.hud.ScoreDisplay;
 import com.findtheblock.team.Team;
@@ -64,11 +65,18 @@ public class GameManager {
         this.bossBarManager = new BossBarManager();
         this.scoreDisplay = new ScoreDisplay(server);
         reloadConfigs();
+        restoreSavedGame();
         refreshHud();
     }
 
     public void tick(MinecraftServer server) {
         this.server = server;
+        try {
+            if (server.getPlayerList().getPlayers().isEmpty()) {
+                return;
+            }
+        } catch (Exception ignored) {
+        }
         if (paused) {
             return;
         }
@@ -149,6 +157,7 @@ public class GameManager {
         bossBarManager.setTitle("Find the Block startet in " + cd);
         bossBarManager.setVisible(true);
         playGlobalSound(SoundEvents.NOTE_BLOCK_PLING);
+        persistState();
         refreshHud();
         return true;
     }
@@ -167,6 +176,7 @@ public class GameManager {
         bossBarManager.setTitle("SPIEL BEENDET");
         // Hide after stop so HUD does not stick forever (M4)
         bossBarManager.setVisible(false);
+        clearSavedState();
         refreshHud();
         return true;
     }
@@ -187,6 +197,7 @@ public class GameManager {
         sendMessage(sender, "Spiel pausiert.");
         broadcastMessage("Spiel pausiert.");
         bossBarManager.setTitle("PAUSIERT");
+        persistState();
         refreshHud();
         return true;
     }
@@ -206,6 +217,7 @@ public class GameManager {
             bossBarManager.setColor(BossEvent.BossBarColor.YELLOW);
             bossBarManager.setTitle("GESUCHT: " + toReadableName(currentTarget));
         }
+        persistState();
         refreshHud();
         return true;
     }
@@ -223,6 +235,7 @@ public class GameManager {
         currentTarget = null;
         sendMessage(sender, "Spiel neu gestartet. Punkte bleiben erhalten (siehe /findblock score reset).");
         bossBarManager.setVisible(false);
+        clearSavedState();
         refreshHud();
         return true;
     }
@@ -249,6 +262,7 @@ public class GameManager {
         bossBarManager.setTitle("GESUCHT: " + toReadableName(currentTarget));
         bossBarManager.setVisible(shouldShowBossBar());
         playGlobalSound(SoundEvents.NOTE_BLOCK_PLING);
+        persistState();
         refreshHud();
     }
 
@@ -296,6 +310,7 @@ public class GameManager {
         countdownTicks = cd * 20;
         bossBarManager.setColor(BossEvent.BossBarColor.PURPLE);
         bossBarManager.setTitle("Nachste Runde in " + cd);
+        persistState();
         refreshHud();
     }
 
@@ -303,6 +318,7 @@ public class GameManager {
         state = GameState.FINISHED;
         paused = false;
         stateBeforePause = null;
+        clearSavedState();
 
         Team winner = determineWinner();
         if (winner != null) {
@@ -414,6 +430,7 @@ public class GameManager {
         bossBarManager.setColor(BossEvent.BossBarColor.GREEN);
         bossBarManager.setTitle(toReadableName(currentTarget) + " GEFUNDEN!");
         playGlobalSound(SoundEvents.NOTE_BLOCK_BELL);
+        persistState();
         refreshHud();
         return true;
     }
@@ -528,7 +545,7 @@ public class GameManager {
         sb.append("Find the Block\n");
         sb.append("\nStatus: ").append(stateName(state)).append("\n");
         if (paused) {
-            sb.append("PAUSIERT\n");
+            sb.append("PAUSIERT - weiter mit /findblock resume\n");
         }
         int maxRounds = ConfigManager.CONFIG != null ? ConfigManager.CONFIG.maxRounds : 10;
         sb.append("Runde: ").append(roundNumber).append("/").append(maxRounds).append("\n");
@@ -621,6 +638,79 @@ public class GameManager {
             }
         }
         refreshHud();
+    }
+
+    public void persistState() {
+        try {
+            GameStateStore store = new GameStateStore();
+            store.state = state != null ? state.name() : GameState.WAITING.name();
+            store.stateBeforePause = stateBeforePause != null ? stateBeforePause.name() : null;
+            store.roundNumber = roundNumber;
+            store.currentIndex = currentIndex;
+            store.currentTarget = currentTarget != null ? currentTarget.toString() : null;
+            store.countdownTicks = countdownTicks;
+            store.betweenRoundTicks = betweenRoundTicks;
+            store.paused = paused;
+            ConfigManager.GAMESTATE = store;
+            ConfigManager.saveState();
+        } catch (Exception e) {
+            FindTheBlockMod.LOGGER.warn("Spielstand konnte nicht gespeichert werden", e);
+        }
+    }
+
+    public void clearSavedState() {
+        try {
+            ConfigManager.GAMESTATE = GameStateStore.createDefault();
+            ConfigManager.saveState();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void restoreSavedGame() {
+        try {
+            ConfigManager.loadState();
+            GameStateStore saved = ConfigManager.GAMESTATE;
+            if (saved == null || !saved.isMidGame()) {
+                return;
+            }
+            if (blockOrder.isEmpty()) {
+                FindTheBlockMod.LOGGER.warn("Gespeichertes Spiel gefunden, aber blockOrder leer - Neustart noetig.");
+                return;
+            }
+            Identifier target = saved.currentTarget != null ? Identifier.tryParse(saved.currentTarget) : null;
+            if (target != null && blockOrder.contains(target)) {
+                currentTarget = target;
+                currentIndex = blockOrder.indexOf(target);
+            } else if (!blockOrder.isEmpty()) {
+                currentIndex = Math.max(0, Math.min(saved.currentIndex, blockOrder.size() - 1));
+                currentTarget = blockOrder.get(currentIndex);
+            } else {
+                return;
+            }
+            roundNumber = Math.max(0, saved.roundNumber);
+            countdownTicks = Math.max(0, saved.countdownTicks);
+            betweenRoundTicks = Math.max(0, saved.betweenRoundTicks);
+            GameState back;
+            try {
+                back = GameState.valueOf(saved.stateBeforePause != null ? saved.stateBeforePause : saved.state);
+            } catch (Exception e) {
+                back = GameState.ACTIVE;
+            }
+            if (back == GameState.WAITING || back == GameState.FINISHED || back == GameState.NEXT_ROUND) {
+                back = GameState.ACTIVE;
+            }
+            stateBeforePause = back;
+            paused = true;
+            state = GameState.WAITING;
+            bossBarManager.setColor(BossEvent.BossBarColor.YELLOW);
+            if (currentTarget != null) {
+                bossBarManager.setTitle("GESUCHT: " + toReadableName(currentTarget) + " (pausiert nach Neustart)");
+            }
+            FindTheBlockMod.LOGGER.info("FindTheBlock-Spielstand wiederhergestellt (Runde {}), pausiert - /findblock resume", roundNumber);
+            persistState();
+        } catch (Exception e) {
+            FindTheBlockMod.LOGGER.warn("Spielstand-Wiederherstellung fehlgeschlagen", e);
+        }
     }
 
     private void refreshHud() {
