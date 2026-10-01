@@ -50,22 +50,21 @@ public class ScoreDisplay {
             }
         }
 
-        // Remove stale entries of deleted teams
+        // Remove stale entries of deleted teams (objective is ours, unknown holders are safe to drop)
         try {
-            for (String holder : scoreboard.getTrackedPlayers()) {
-                boolean known = false;
-                for (Team t : teams) {
-                    if (t != null && holder.equals(t.id)) {
-                        known = true;
-                        break;
-                    }
+            java.util.Set<String> current = new java.util.HashSet<>();
+            for (Team t : teams) {
+                if (t != null && t.id != null) {
+                    current.add(t.id);
                 }
-                if (!known && holder != null && holder.startsWith("team")) {
-                    scoreboard.resetSinglePlayerScore(ScoreHolder.forNameOnly(holder), objective);
+            }
+            for (ScoreHolder holder : scoreboard.getTrackedPlayers()) {
+                if (holder != null && !current.contains(holder.getScoreboardName())) {
+                    scoreboard.resetSinglePlayerScore(holder, objective);
                 }
             }
         } catch (Exception ignored) {
-            // getTrackedPlayers may differ across mappings - stale entries are harmless
+            // stale entries are harmless
         }
     }
 
