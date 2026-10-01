@@ -10,6 +10,8 @@ import net.minecraft.world.scores.ScoreHolder;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class ScoreDisplay {
@@ -22,7 +24,6 @@ public class ScoreDisplay {
     }
 
     public void update(Collection<Team> teams, Map<String, Integer> scores) {
-        // Reuse objective instead of clear()+recreate to avoid flicker/packet spam (M4)
         Objective objective = scoreboard.getObjective(OBJECTIVE_NAME);
         if (objective == null) {
             objective = scoreboard.addObjective(
@@ -39,25 +40,20 @@ public class ScoreDisplay {
         if (teams == null) return;
         if (scores == null) scores = Map.of();
 
-        // Stable holder = team.id (no collisions, no 40-char limit issues).
-        // Sidebar therefore shows IDs (team1) - stable by design.
+        Map<String, String> holderByTeam = holderNames(teams);
         for (Team team : teams) {
             if (team == null || team.id == null) continue;
             int points = scores.getOrDefault(team.id, 0);
+            String holder = holderByTeam.getOrDefault(team.id, team.id);
             try {
-                scoreboard.getOrCreatePlayerScore(ScoreHolder.forNameOnly(team.id), objective).set(points);
+                scoreboard.getOrCreatePlayerScore(ScoreHolder.forNameOnly(holder), objective).set(points);
             } catch (Exception ignored) {
             }
         }
 
-        // Remove stale entries of deleted teams (objective is ours, unknown holders are safe to drop)
+        // Objective is ours, so unknown holders are safe to drop (also migrates old team-id holders)
         try {
-            java.util.Set<String> current = new java.util.HashSet<>();
-            for (Team t : teams) {
-                if (t != null && t.id != null) {
-                    current.add(t.id);
-                }
-            }
+            java.util.Set<String> current = new java.util.HashSet<>(holderByTeam.values());
             for (ScoreHolder holder : scoreboard.getTrackedPlayers()) {
                 if (holder != null && !current.contains(holder.getScoreboardName())) {
                     scoreboard.resetSinglePlayerScore(holder, objective);
@@ -66,6 +62,30 @@ public class ScoreDisplay {
         } catch (Exception ignored) {
             // stale entries are harmless
         }
+    }
+
+    static Map<String, String> holderNames(Collection<Team> teams) {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Team t : teams) {
+            if (t == null || t.id == null) continue;
+            String base = (t.name == null || t.name.isBlank()) ? t.id : t.name;
+            if (base.length() > 36) base = base.substring(0, 36);
+            String holder = base;
+            if (out.containsValue(holder)) {
+                String suffix = " (" + t.id + ")";
+                int room = 40 - suffix.length();
+                String cut = base.length() > room ? base.substring(0, Math.max(0, room)) : base;
+                holder = cut + suffix;
+                if (holder.length() > 40) holder = holder.substring(0, 40);
+            }
+            int k = 2;
+            while (out.containsValue(holder)) {
+                String s = " #" + k++;
+                holder = holder.length() + s.length() > 40 ? holder.substring(0, 40 - s.length()) + s : holder + s;
+            }
+            out.put(t.id, holder);
+        }
+        return out;
     }
 
     public void clear() {
