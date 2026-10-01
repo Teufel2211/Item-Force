@@ -36,7 +36,7 @@ Windows:
 gradlew.bat build
 ```
 
-Output jar: `build/libs/findtheblock-1.1.0.jar`
+Output jar: `build/libs/findtheblock-1.2.0.jar`
 
 ## Configuration
 
@@ -71,6 +71,8 @@ All files live in `config/findtheblock/` and are auto-created on first start.
 | `showBossBar` | Show the target block bossbar at the top of the screen |
 | `showScoreboard` | Show the compact team score sidebar |
 | `allowUnassignedPlayers` | Allow players without a team to find blocks (no team point) |
+| `ignorePlacedDuringRound` | Blocks placed during the round don't count (anti-farm, default true) |
+| `ignoreCreativePlayers` | Creative/spectator finds don't count (default true) |
 | `loopBlocks` | After the last block, start again with the first block |
 | `allowedDimensions` | Dimensions in which the target block counts |
 
@@ -89,7 +91,8 @@ All files live in `config/findtheblock/` and are auto-created on first start.
     "minecraft:redstone_ore",
     "minecraft:lapis_ore",
     "minecraft:diamond_ore",
-    "minecraft:emerald_ore"
+    "minecraft:emerald_ore",
+    "minecraft:ancient_debris"
   ]
 }
 ```
@@ -144,6 +147,8 @@ Admin commands require operator (game master) permission.
 
 /findblock score
 /findblock score <team>
+/findblock score reset
+/findblock score reset confirm
 ```
 
 Example:
@@ -157,6 +162,9 @@ Example:
 - Only one point per round (atomic server-side check, no double wins).
 - Scores are stored in `scores.json` and survive server restarts.
 - Only teams get points – no individual player scores.
+- `score reset` needs confirmation and is logged with the admin's name.
+- Game state (round, target, timers) persists in `gamestate.json` and resumes paused after a restart.
+- Fairness: target blocks placed during the round don't count; prepare between rounds.
 
 ## How a round feels
 
