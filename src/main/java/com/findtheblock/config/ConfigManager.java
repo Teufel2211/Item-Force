@@ -71,7 +71,11 @@ public class ConfigManager {
     public static void saveScores() { writeJson(SCORES_FILE, SCORES); }
 
     private static FindBlockConfig loadConfig() {
-        return readJson(CONFIG_FILE, FindBlockConfig.class, FindBlockConfig::createDefault, false);
+        FindBlockConfig cfg = readJson(CONFIG_FILE, FindBlockConfig.class, FindBlockConfig::createDefault, true);
+        if (cfg != null) {
+            cfg.validate();
+        }
+        return cfg;
     }
 
     private static BlockConfig loadBlocks() {
@@ -85,11 +89,19 @@ public class ConfigManager {
     }
 
     private static PlayerConfig loadPlayers() {
-        return readJson(PLAYERS_FILE, PlayerConfig.class, PlayerConfig::createDefault, true);
+        PlayerConfig cfg = readJson(PLAYERS_FILE, PlayerConfig.class, PlayerConfig::createDefault, true);
+        if (cfg != null && cfg.players == null) {
+            cfg.players = new HashMap<>();
+        }
+        return cfg;
     }
 
     private static ScoreConfig loadScores() {
-        return readJson(SCORES_FILE, ScoreConfig.class, ScoreConfig::createDefault, true);
+        ScoreConfig cfg = readJson(SCORES_FILE, ScoreConfig.class, ScoreConfig::createDefault, true);
+        if (cfg != null && cfg.scores == null) {
+            cfg.scores = new HashMap<>();
+        }
+        return cfg;
     }
 
     private static <T> T readJson(Path path, Class<T> type, Supplier<T> defaultValues, boolean saveIfMissing) {
@@ -105,7 +117,7 @@ public class ConfigManager {
             String json = Files.readString(path, StandardCharsets.UTF_8);
             T parsed = GSON.fromJson(json, type);
             if (parsed == null) {
-                throw new JsonSyntaxException("JSON ist leer oder ungültig");
+                throw new JsonSyntaxException("JSON ist leer oder ungultig");
             }
             if (parsed instanceof BlockConfig blockConfig) {
                 blockConfig.validate();
@@ -113,12 +125,26 @@ public class ConfigManager {
             if (parsed instanceof TeamConfig teamConfig) {
                 teamConfig.fixMissingIds();
             }
+            if (parsed instanceof FindBlockConfig findCfg) {
+                findCfg.validate();
+            }
             return parsed;
         } catch (IOException | JsonSyntaxException e) {
-            FindTheBlockMod.LOGGER.warn("Fehler beim Laden von {}: {}. Standarddatei wird verwendet.", path, e.getMessage());
+            FindTheBlockMod.LOGGER.warn("Fehler beim Laden von {}: {}. Standard wird verwendet, defekte Datei nach .bak gesichert.", path, e.getMessage());
+            backupCorrupt(path);
             T value = defaultValues.get();
             writeJson(path, value);
             return value;
+        }
+    }
+
+    private static void backupCorrupt(Path path) {
+        try {
+            if (Files.exists(path)) {
+                Path bak = path.resolveSibling(path.getFileName().toString() + ".bak");
+                Files.copy(path, bak, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (Exception ignored) {
         }
     }
 
