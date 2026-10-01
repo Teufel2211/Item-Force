@@ -14,7 +14,7 @@
     "main": ["com.findtheblock.FindTheBlockMod"]
   },
   "depends": {
-    "fabricloader": ">=0.18.4",
-    "fabric-api": ">=0.155.2+26.1.2"
+    "fabricloader": ">=0.19.5",
+    "fabric-api": ">=0.161.0+26.2"
   }
 }
