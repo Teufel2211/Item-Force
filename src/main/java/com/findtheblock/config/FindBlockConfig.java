@@ -19,6 +19,42 @@ public class FindBlockConfig {
     );
 
     public static FindBlockConfig createDefault() {
-        return new FindBlockConfig();
+        FindBlockConfig cfg = new FindBlockConfig();
+        cfg.validate();
+        return cfg;
+    }
+
+    public void validate() {
+        if (countdownSeconds < 1 || countdownSeconds > 300) {
+            countdownSeconds = 5;
+        }
+        if (betweenRoundSeconds < 0 || betweenRoundSeconds > 300) {
+            betweenRoundSeconds = 3;
+        }
+        if (maxRounds < 1 || maxRounds > 10000) {
+            maxRounds = 10;
+        }
+        if (triggerMode == null) {
+            triggerMode = "BREAK";
+        } else {
+            String m = triggerMode.toUpperCase();
+            if (!m.equals("BREAK") && !m.equals("PLACE") && !m.equals("INTERACT")) {
+                triggerMode = "BREAK";
+            } else {
+                triggerMode = m;
+            }
+        }
+        if (allowedDimensions == null) {
+            allowedDimensions = Arrays.asList(
+                    "minecraft:overworld",
+                    "minecraft:the_nether",
+                    "minecraft:the_end"
+            );
+        }
+    }
+
+    public String normalizedTriggerMode() {
+        if (triggerMode == null) return "BREAK";
+        return triggerMode.toUpperCase();
     }
 }
