@@ -10,6 +10,7 @@ import com.findtheblock.team.TeamManager;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -22,7 +23,11 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -36,6 +41,7 @@ public class GameManager {
     private int countdownTicks = 0;
     private int betweenRoundTicks = 0;
     private final AtomicBoolean roundAlreadyWon = new AtomicBoolean(false);
+    private final Map<String, Set<Long>> placedMarks = new HashMap<>();
     private Identifier currentTarget;
     private MinecraftServer server;
     private BossBarManager bossBarManager;
@@ -131,6 +137,7 @@ public class GameManager {
         roundNumber = 0;
         currentIndex = 0;
         roundAlreadyWon.set(false);
+        clearPlacedMarks();
         state = GameState.COUNTDOWN;
         int cd = ConfigManager.CONFIG != null ? ConfigManager.CONFIG.countdownSeconds : 5;
         if (cd < 1) cd = 5;
@@ -212,6 +219,7 @@ public class GameManager {
         countdownTicks = 0;
         betweenRoundTicks = 0;
         roundAlreadyWon.set(false);
+        clearPlacedMarks();
         currentTarget = null;
         sendMessage(sender, "Spiel neu gestartet. Punkte bleiben erhalten (siehe /findblock score reset).");
         bossBarManager.setVisible(false);
@@ -233,6 +241,7 @@ public class GameManager {
         roundNumber++;
         currentTarget = blockOrder.get(currentIndex);
         roundAlreadyWon.set(false);
+        clearPlacedMarks();
         state = GameState.ACTIVE;
 
         broadcastMessage("Neue Runde " + roundNumber + "! Gesucht wird: " + toReadableName(currentTarget));
@@ -355,6 +364,16 @@ public class GameManager {
             return false;
         }
 
+        if (ConfigManager.CONFIG != null && ConfigManager.CONFIG.ignoreCreativePlayers) {
+            try {
+                if (player.isSpectator() || player.getAbilities().instabuild) {
+                    player.sendSystemMessage(Component.literal("Kreativ/Zuschauer zahlt nicht - wechsle in Survival."));
+                    return false;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
         if (!isDimensionAllowed(world)) {
             return false;
         }
@@ -397,6 +416,45 @@ public class GameManager {
         playGlobalSound(SoundEvents.NOTE_BLOCK_BELL);
         refreshHud();
         return true;
+    }
+
+    public boolean isActiveRound() {
+        return !paused && state == GameState.ACTIVE && currentTarget != null;
+    }
+
+    public Block getCurrentTargetBlock() {
+        try {
+            if (currentTarget == null) return null;
+            return BuiltInRegistries.BLOCK.getValue(currentTarget);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public void markPlaced(ServerLevel level, BlockPos pos) {
+        if (level == null || pos == null) return;
+        if (ConfigManager.CONFIG == null || !ConfigManager.CONFIG.ignorePlacedDuringRound) return;
+        if (!isActiveRound()) return;
+        try {
+            placedMarks.computeIfAbsent(dimensionId(level), k -> new HashSet<>()).add(pos.asLong());
+        } catch (Exception ignored) {
+        }
+    }
+
+    public boolean consumeIfPlaced(ServerLevel level, BlockPos pos) {
+        if (level == null || pos == null) return false;
+        if (ConfigManager.CONFIG == null || !ConfigManager.CONFIG.ignorePlacedDuringRound) return false;
+        try {
+            Set<Long> set = placedMarks.get(dimensionId(level));
+            if (set == null) return false;
+            return set.remove(pos.asLong());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void clearPlacedMarks() {
+        placedMarks.clear();
     }
 
     private boolean isTargetBlock(Block block) {
